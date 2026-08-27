@@ -37,7 +37,7 @@ class Element:
         self.args |= args
         return self
     def build(self) -> str:
-        attrs: str = " ".join(f'{key}="{value}"' for key, value in self.args.items())
+        attrs: str = " ".join(f'{key}="{(value.__name__ + "()") if callable(value) else value}"' for key, value in self.args.items())
         content: str = "".join([arg.build() if isinstance(arg, Element) else arg for arg in self.contents])
         return f"<{self.tag} {attrs}>{content}</{self.tag}>"
 
