@@ -5,9 +5,18 @@
 
 Webpage framework with a full scripting language and easy to understand syntax.
 
+> `n2 get fluorine`
+
+## Dependencies
+
+- Python 3.12+
+- [Magnesium](https://github.com/Wednesware/Magnesium)
+
+> `n2 getdep`
+
 # `fluorine`
 
-From the base library, you can import two basic classes: `Page` and `Site`.
+From the base library, you can import two base classes: `Page` and `Site`.
 
 > `from fluorine import Page, Site`
 
