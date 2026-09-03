@@ -15,19 +15,18 @@ If you don't have Nitrogen: `pipx install wwn` first.
 
 ## Quick start
 
-### Basic website
+### Basic page
 
 ```python
 from ww.f import Page
-from ww.f.structuring import title, h1
+from ww.f.structuring import h1, p
 
-page: Page = Page("index")
-
-page.head(title("Home"))
-
-page.body(h1("Welcome"))
-
-page.build()
+page = Page("index")
+page.body(
+    h1 ("Hello, world!"),
+    p ("This page was generated with Fluorine.")
+)
+page.build("index.html")
 ```
 
 ### Styling
@@ -35,271 +34,218 @@ page.build()
 ```python
 from ww.f import Page
 from ww.f.structuring import h1, p
-from ww.f.styling import Style
 
-page: Page = Page("index")
-
-page.style("#title",
-    color="red",
-    background_color=(255, 100, 100)
+page = Page("demo")
+page.style .title (
+    color="gold",
+    font_size="32px"
 )
+page.style("p", color="#d9d9d9")
+page.style("#p", color="#ff0000")
 
 page.body(
-    h1("Welcome", id="title"),
-    p("This is a styled paragraph.", style=Style(
-        padding_top="10px",
-        color="#121212"
-    )),
+    h1 .title ("Welcome"),
+    p ("A styled paragraph.", id="text")
 )
-
-page.build()
+page.build("demo.html")
 ```
 
-### Scripting
+### Event handling and DOM updates
 
 ```python
 from ww.f import Page
-from ww.f.structuring import p, button
-from ww.f.scripting import Script
+from ww.f.structuring import h1, p, button
+from ww.f.scripting import document, event
 
-page: Page = Page("index")
+page = Page("demo")
 
-page.script(Script(
-    "console.log('Hello World!')"
-))
 
-my_script: Script = Script()
-my_script.i = 1
-page.script(my_script)
-
-@page.script # Adds the generated Script object to the page
-@Script.function # Generates a Script object from the function
-def onButtonClick(script: Script) -> None:
-    script("i++", "console.log(i)")
+def handle_click():
+    document.getElementById("title").innerHTML = "Updated from Python"
+    document["#status"].textContent = "The button worked."
+    page.run("document.body.style.background = '#111';")
 
 page.body(
-    p("Click the button to increment i"),
-    button("Increment", onclick=onButtonClick),
+    h1 ("Hello", id="title"),
+    p ("Waiting for a click...", id="status"),
+    button ("Click me!") @ event(onclick=handle_click),
 )
 
-page.build()
-```
-
-### Live Reload
-
-```python
-from ww.f import Page
-from ww.f.livereload import liveReload
-
-liveReload(__file__)
-
-page: Page = Page("index")
-page.build()
+page.build("demo.html")
 ```
 
 ## Dependencies
 
 - Python 3.12+
-- [Magnesium](https://github.com/Wednesware/Magnesium)
-
-Install dependencies faster with Nitrogen:
-
-> `n2 getdep fluorine`
+- pywebview
+- Magnesium / ww.mg26_12 utilities
 
 # Definitions
 
 ## `fluorine`
 
-From the base library, you can import two base classes: `Page` and `Site`.
+From the base library, you can import the core page objects and helpers.
 
 > `from ww.f import Page, Site`
 
-### `fluorine:Page(name: str = "index")`
+### `fluorine:Page(name: str)`
 
-A Page is the base of any Fluorine webpage. You can use methods such as `head`, `body`, and `style` to add content to the page. You can also use the `build` method to generate the HTML file.
+The `Page` object represents one HTML document. It stores the generated page content, manages event handlers, and can be written to a file with `build()`.
 
-> `page: Page = Page("about")`
+> `page = Page("index")`
 
-#### `fluorine:Page.head(*contents: str | Element, **args: str)`
+#### `fluorine:Page.head(*contents: str | Element, **attrs: str)`
 
-Adds content to the head of the page. Should only be called once per page.
+Adds content to the document head.
 
-> `page.head(title("About Us"), id="page-head")`
+> `page.head(title ("My page"), id="page-head")`
 
-#### `fluorine:Page.body(*contents: str | Element, **args: str)`
+#### `fluorine:Page.body(*contents: str | Element, **attrs: str)`
 
-Adds content to the body of the page. Should only be called once per page.
+Adds content to the document body.
 
-> `page.body(h1("About Us"), p("Welcome to our website!"), id="page-body")`
+> `page.body(h1 ("Hello"), p ("World"), id="main")`
 
-#### `fluorine:Page.style(identifier: str = "*", *style_objects: Style, **styles: str)`
+#### `fluorine:Page.style(selector: str = "*", *style_objects: Style, **styles: str)`
 
-Adds a style block to the page. You can either pass `key=value` styling pairs or `Style` objects directly. The identifier is used to specify which elements the styles should apply to. If no identifier is provided, the styles will apply to all elements.
+Adds CSS rules to the page. The selector can target tags, ids, classes, or any CSS selector.
 
-Example identifiers:
-1. `*` - all elements
-2. `h1` - all `h1` elements
-3. `#my-id` - the element with the id `my-id`
-4. `.my-class` - all elements with the class `my-class`
-5. `div > p` - all `p` elements that are direct children of a `div` element
-6. See [CSS Selectors](https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_Selectors) for more information.
+> `page.style("h1", color="gold", font_size="32px")`
 
-Styles also support tuples of RGB values for color specifications.
+#### `fluorine:Page.connect(path: str | FilePath)`
 
-> `page.style(".styled-text", my_style_object, my_other_style_object, color=(255, 0, 0), font_size="16px")`
+Includes an external HTML, CSS, or JavaScript file in the page output.
+
+> `page.connect("styles.css")`
 
 #### `fluorine:Page.script(script: Script)`
 
-Adds a script block to the page. If the script was created using `Script.function`, this method returns the original source function.
+Adds a script block to the page.
 
-> `page.script(myScript)`
+> `page.script(Script("console.log('ready');"))`
 
-Can also be used as a decorator when paired with `Script.function`.
+#### `fluorine:Page.bind(element: Element, event_name: str, handler: callable)`
 
-> `@page.script`
+Registers a Python callable against a DOM event for a given element.
 
-> `@Script.function`
+> `page.bind(button ("Run"), "onclick", handle_click)`
 
-> `def myScript(script: Script):`
+#### `fluorine:Page.document`
 
-> `    script("console.log('Hello World!')")`
+Exposes a page-bound JavaScript document proxy so Python can target DOM elements directly.
 
-**The `@page.script` decorator must be used first as it expects the script object that `Script.function` returns.**
+> `page.document.getElementById("title").innerHTML = "Updated title"`
 
-Because `page.script` returns the original source function, functions created with these decorators can be used as values for attributes such as `onclick`.
+#### `fluorine:Page.run(script: str)`
 
-> `button("Click Me", onclick=myScript)`
+Queue or execute a JavaScript snippet immediately when a window is attached.
 
-More info on this in the `fluorine.scripting:Script.function` section.
+> `page.run("document.body.style.background = '#111';")`
+
+#### `fluorine:Page.log(message: str)`
+
+Prints a log message to the console.
+
+> `page.log("Page initialized")`
 
 #### `fluorine:Page.build(to: str | FilePath | None = None)`
 
-Generates the HTML file for the page. If no `to` argument is provided, the file will be generated in the current working directory with the name of the page as the filename.
+Builds the HTML file and returns the target path.
 
-> `page.build("output/about.html")`
+> `page.build("output/index.html")`
 
 ### `fluorine:Site(*pages: Page)`
 
-Creates a simple collection of pages. Each page can be retrieved with `Site["page_name"]`.
+A simple collection of pages that can be accessed by name. Pages can be retrieved using `site / "page_name"` or `site["page_name"]`.
 
-> `site: Site = Site(page1, page2)`
-
-> `page1 = site["page1"]`
-
-> `for page in site: ...`
+> `site = Site(home, about)`
 
 ## `fluorine.structuring`
 
-A library of all elements and the `Element` base class.
+From the structuring library, you can import the HTML element builder helpers.
 
-> `from ww.f.structuring import *`
+> `from ww.f.structuring import Element, h1, p, button, div`
 
-### `fluorine.structuring:Element(tag: str, *contents: str | Element, **args: str)`
+### `fluorine.structuring:Element(tag: str, *contents: str | Element, **attrs: str)`
 
-The base class for all elements. You can pass the tag and contents + arguments in one declaration like this:
+The base HTML element builder used by all generated tag helpers. You can bind an event to an element with `@event(name=handler)`. `event` can be imported from the `scripting` module.
 
-> `my_element: Element = Element("div", "Hello World!", id="my-div")`
+> `row = Element("div", "Hello", id="row")`
 
-Or create an empty element and provide the contents and arguments later like this:
+### `fluorine.structuring:<element>(*contents: str | Element, **attrs: str)`
 
-> `my_element_base: Element = Element("div")`
+Fluorine exposes a generated object for common HTML tags, including `h1`, `p`, `button`, `div`, `span`, `section`, `table`, and more.
 
-> `my_element = my_element_base("Hello World!", id="my-div")`
-
-### `fluorine.structuring:<element>(*contents: str | Element, **args: str)`
-
-The library also includes an empty Element object for each of the 112 default HTML tags. You can use these to create elements without having to specify the tag name each time.
-
-> `from ww.f.structuring import h1, p, div`
-
-> `h1("Hello World!")`
+> `heading = h1 ("Hello")`
 
 ## `fluorine.styling`
 
-A library for creating CSS styles. You can create a `Style` object and pass it to the `Page.style` method or as a value to a `style=` argument in an `Element` object or `Page.body`/`Page.head` method.
+From the styling library, you can import the CSS helper object.
 
 > `from ww.f.styling import Style`
 
 ### `fluorine.styling:Style(**styles: str)`
 
-Simple object that converts `key=value` pairs into CSS styles. To convert a `Style` object into a string, you can simply use the `str()` function.
+Creates a CSS declaration block from keyword arguments.
 
-Styles also support tuples of RGB values for color specifications.
+> `style = Style(color="gold", padding="10px")`
 
-> `my_style: Style = Style(color=(255, 0, 0), font_size="16px")`
+#### `fluorine.styling:Style.__str__()`
 
-> `my_style_str: str = str(my_style)`
+Returns the serialized CSS string.
 
-> `h1("Hello World!", style=my_style)`
+> `css = str(style)`
 
 ## `fluorine.scripting`
 
-A library for creating and managing JavaScript scripts via "fluoscripting".
+From the scripting library, you can import JavaScript helpers and DOM accessors.
 
-> `from ww.f.scripting import Script`
+> `from ww.f.scripting import Script, event, document`
 
 ### `fluorine.scripting:Script(*lines: str)`
 
-Creates a new script object. You can pass multiple lines of JavaScript code as strings to this constructor.
+Builds a JavaScript snippet or script block.
 
-> `my_script: Script = Script("console.log('Hello, world!')")`
+> `script = Script("console.log('ready');")`
 
-**Scripts can be called after they're initialized. Calling a script object has the same arguments as the constructor.**
+#### `fluorine.scripting:Script.__call__(*contents: str)`
 
-> `my_script("console.log('Hello, again!')")`
+Adds more JavaScript lines to the script.
 
-**By setting an attribute that does not begin with _ on a `Script` object, the provided value is converted to JavaScript and the variable is then available in future lines.**
+> `script("count += 1", "console.log(count)")`
 
-> `my_script.my_variable = [42, "hello", None]`
+#### `fluorine.scripting:Script.__setattr__(name: str, value: object)`
 
-> `my_script("console.log(my_variable)")`
+Assigns Python values to generated JavaScript variables.
 
-> Output: `Array(3) [ 42, "hello", null ]`
+> `script.count = 0`
 
-### `@fluorine.scripting:Script.function`
+### `fluorine.scripting:event(**events)`
 
-This is a **classmethod** (which means you should run `Script.function` on the class itself, not an instance) meant to be used primarily as a decorator.
+Creates a tuple of event metadata objects that can be applied to an element with `@`.
 
-`Script.function` creates a new JavaScript function and any additions to the script object will be included within the function body.
+> `button("Click me!") @ event(onclick=handle_click)`
 
-When used as a decorator, the function right after should expect one argument, `script`, which is a new script object. **The name of the function is important, as it will be used as the name of the JavaScript function in the generated script.**
+### `fluorine.scripting:document`
 
-Using this decorator transforms the function into a `Script` object with the source function located in the `_source_fn` attribute.
+A global document-style proxy that targets browser DOM elements from Python. It supports `getElementById`, `querySelector`, property assignment, and direct JS-like property access. Supports selector lookup through `document["#status"]`.
+
+> `document.getElementById("status").innerHTML = "Updated"`
+
+#### `fluorine.scripting:document.getElementById(element_id: str)`
+
+Returns a JS-like element wrapper for the target DOM node.
+
+> `element = document.getElementById("title")`
 
 ## `fluorine.livereload`
 
-A library meant primarily for testing and development. It allows your script to run every time a change is made to it, and is highly recommended to be used alongside the `Five Server` or `Live Server` extensions for VS Code, neither of which are affiliated with Wednesware or Fluorine.
+From the live reload helper, you can import the development watcher.
 
-Fluorine's live reload feature works seamlessly with these extensions.
+> `from ww.f.livereload import live_reload`
 
-> `from ww.f.livereload import liveReload`
+### `fluorine.livereload:live_reload(path: str)`
 
-### `fluorine.livereload:liveReload(path: str)`
+Watches a file for changes and re-runs the script when `--livereload` is passed in.
 
-The `path` argument of this function should always be `__file__`.
-
-Add this function call before any code runs (not including imports):
-
-> `liveReload(__file__)`
-
-You must use the `--livereload` flag when running your script to enable this feature.
-
-> `python my_script.py --livereload`
-
-You can use the `--lrsilent` flag to disable the console output of this function.
-
-> `python my_script.py --livereload --lrsilent`
-
-`liveReload` normally listens for changes every 0.1 seconds, but this can be tweaked if you modify the library code yourself.
-
-# Also check out
-
-- [Nitrogen](https://github.com/Wednesware/Nitrogen) - Easily install Fluorine and ALL other Wednesware publications in a short and simple command.
-
-> `n2 get <publication>`
-
-- [Sulfur](https://github.com/Wednesware/Sulfur) - Convert your Fluorine webpage to a Bue desktop app in two lines using Sulfur.
-
-> `from ww.s.bue import Bue`
-
-> `Bue(page).open()`
+> `live_reload(__file__)`

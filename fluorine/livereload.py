@@ -1,7 +1,7 @@
 import subprocess, sys, time
 
 
-def liveReload(path: str) -> None:
+def live_reload(path: str) -> None:
     if "--livereload" in sys.argv:
         old_content: str = ""
         while True:
