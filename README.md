@@ -77,8 +77,7 @@ page.build("demo.html")
 ## Dependencies
 
 - Python 3.12+
-- pywebview
-- Magnesium / ww.mg26_12 utilities
+- Magnesium 26.12
 
 # Definitions
 
