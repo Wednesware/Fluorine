@@ -1,9 +1,7 @@
-import re
-import sys
-
-from ww.mg26_12.filepath import FilePath
-from ww.mg26_12.color import Color
-
+import re, sys
+from nitrogen import require
+FilePath = require("magnesium.filepath").FilePath
+Color = require("magnesium.color").Color
 from .structuring import Element
 from .styling import Style
 from .scripting import Script, document
@@ -93,7 +91,7 @@ class Page:
     def log(self, message: str) -> None:
         print(f"{message} {Color.gray}(log from page '{self.name}'){Color.reset}")
 
-    def connect(self, path: FilePath | str) -> None:
+    def connect(self, path: FilePath | str) -> None: # type: ignore
         path = FilePath(path)
         match str(path).split(".")[-1].lower():
             case "html":
@@ -137,7 +135,7 @@ class Page:
             self.register_python_handler(handler)
         return element.bind(event_name, handler)
 
-    def build(self, to: str | FilePath | None = None) -> FilePath | None:
+    def build(self, to: str | FilePath | None = None) -> FilePath | None: # type: ignore
         to = FilePath(to or f"{self.name}.html")
         html_content = f"<!DOCTYPE html><html>{self._html_content}</html>"
         to.write(html_content)

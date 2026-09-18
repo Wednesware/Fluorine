@@ -77,7 +77,7 @@ page.build("demo.html")
 ## Dependencies
 
 - Python 3.12+
-- Magnesium 26.12
+- Nitrogen 26.59+ (`pip install wwn`)
 
 # Definitions
 
