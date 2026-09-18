@@ -92,13 +92,14 @@ class Page:
         print(f"{message} {Color.gray}(log from page '{self.name}'){Color.reset}")
 
     def connect(self, path: FilePath | str) -> None: # type: ignore
-        path = FilePath(path)
+        path = str(path)
         match str(path).split(".")[-1].lower():
             case "html":
-                self._html_content += path.read()
+                with open(path) as file:
+                    content: str = file.read()
+                self._html_content += content
             case "css":
                 self._html_content += f"<link rel=\"stylesheet\" href=\"{path}\">"
-
             case "js":
                 self._html_content += f"<script src=\"{path}\"></script>"
             case _:
