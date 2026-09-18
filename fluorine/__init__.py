@@ -124,7 +124,7 @@ class Page:
             
         def __call__(self, identifier: str = "*", *style_objects: Style, **styles: str) -> None:
             style_objects += (Style(**styles),)
-            identifier = f"{self.class_name}{identifier}" if self.class_name and identifier != "*" else self.class_name.strip()
+            identifier = self.class_name.strip() if self.class_name and identifier == "*" else f"{self.class_name}{identifier}"
             self.page._html_content += f"<style>{identifier} {{ {''.join([str(style) for style in style_objects])} }}</style>"
             self.class_name = ""
 
