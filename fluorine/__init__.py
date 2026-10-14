@@ -1,5 +1,6 @@
 """Fluorine: Python-authored HTML with a mutable element tree."""
 import re
+from html import escape
 from html.parser import HTMLParser
 from pathlib import Path
 from .structuring import Element, RawHTML, component, head as head_tag, body as body_tag
@@ -36,13 +37,20 @@ class _HTMLTreeParser(HTMLParser):
         node = Element(tag, **dict(attrs))
         self.stack[-1].append(node)
         if tag not in VOID_TAGS: self.stack.append(node)
-    def handle_startendtag(self, tag, attrs): self.handle_starttag(tag, attrs)
+    def handle_startendtag(self, tag, attrs):
+        # Self-closing tags must not remain on the parser stack.
+        self.stack[-1].append(Element(tag, **dict(attrs)))
     def handle_endtag(self, tag):
         for i in range(len(self.stack)-1, 0, -1):
             if self.stack[i].tag == tag:
                 del self.stack[i:]
                 break
-    def handle_data(self, data): self.stack[-1].append(data)
+    def handle_data(self, data):
+        # HTMLParser does not decode raw-text contents in script/style tags.
+        if self.stack[-1].tag in ('script', 'style'):
+            self.stack[-1].append(RawHTML(data))
+        else:
+            self.stack[-1].append(data)
     def handle_entityref(self, name): self.stack[-1].append(RawHTML('&'+name+';'))
     def handle_charref(self, name): self.stack[-1].append(RawHTML('&#'+name+';'))
     def handle_comment(self, data): self.stack[-1].append(RawHTML('<!--'+data+'-->'))
@@ -52,6 +60,7 @@ class Page:
     def __init__(self, name):
         self.name = name
         self.content = [head_tag(), body_tag()]
+        self.html_attrs = {}
         self._python_handlers = {}
         self._handler_ids = {}
         self._window = None
@@ -60,20 +69,60 @@ class Page:
         self.style = self._StyleSetting(self)
         document._page = self
 
+    @staticmethod
+    def _parse_html(source):
+        parser = _HTMLTreeParser()
+        parser.feed(source)
+        parser.close()
+        nodes = list(parser.root.contents)
+        # The parser root represents the document; avoid nesting <html> tags.
+        html_nodes = [n for n in nodes if isinstance(n, Element) and n.tag == 'html']
+        if html_nodes:
+            return list(html_nodes[0].contents), dict(html_nodes[0].args)
+        return nodes, {}
+
     @classmethod
     def from_html(cls, path, name=None):
         path = Path(str(path))
-        parser = _HTMLTreeParser()
-        parser.feed(path.read_text(encoding='utf-8'))
-        parser.close()
+        nodes, html_attrs = cls._parse_html(path.read_text(encoding='utf-8'))
         page = cls(name or path.stem)
-        parsed = parser.root.contents
-        html_nodes = [c for c in parsed if isinstance(c, Element) and c.tag == 'html']
-        page.content = html_nodes[0].contents if html_nodes else parsed
-        for tag in ('head', 'body'):
-            if not any(isinstance(c, Element) and c.tag == tag for c in page.content):
-                page.content.append(Element(tag))
+        page.html_attrs = html_attrs
+        page.content = []
+        for node in nodes:
+            if isinstance(node, Element) and node.tag in ('head', 'body'):
+                existing = next((n for n in page.content if isinstance(n, Element) and n.tag == node.tag), None)
+                if existing is None:
+                    page.content.append(node)
+                else:
+                    existing.set(**node.args)
+                    existing.append(*node.contents)
+            else:
+                page._get_tag('body').append(node)
+        page._normalize_document()
         return page
+
+    def _normalize_document(self):
+        # Keep exactly one head and body, in the correct order.
+        head = None
+        body = None
+        extra = []
+        for node in self.content:
+            if isinstance(node, Element) and node.tag == 'head':
+                if head is None: head = node
+                else:
+                    head.set(**node.args)
+                    head.append(*node.contents)
+            elif isinstance(node, Element) and node.tag == 'body':
+                if body is None: body = node
+                else:
+                    body.set(**node.args)
+                    body.append(*node.contents)
+            else:
+                extra.append(node)
+        head = head or head_tag()
+        body = body or body_tag()
+        if extra: body.contents[:0] = extra
+        self.content = [head, body]
 
     def _next_uid(self):
         self._uid_counter += 1
@@ -125,8 +174,8 @@ class Page:
     def register_python_handler(self, handler):
         if not callable(handler): raise TypeError('Expected callable')
         key = id(handler)
-        if key not in self._handler_ids:
-            base = re.sub(r'\W', '_', getattr(handler, '__name__', 'handler'))
+        if key not in self._handler_ids or self._python_handlers.get(self._handler_ids[key]) is not handler:
+            base = re.sub(r'\W|^(?=\d)', '_', getattr(handler, '__name__', 'handler')) or 'handler'
             name = f'_fl_{base}_{len(self._python_handlers)}'
             self._python_handlers[name] = handler
             self._handler_ids[key] = name
@@ -139,19 +188,18 @@ class Page:
         path = Path(str(path))
         extension = path.suffix.lower()
         if extension == '.html':
-            parser = _HTMLTreeParser(); parser.feed(path.read_text(encoding='utf-8'))
-            for node in parser.root.contents:
-                if isinstance(node, Element) and node.tag in ('html', 'head', 'body'):
-                    for part in (node.contents if node.tag == 'html' else [node]):
-                        if isinstance(part, Element) and part.tag in ('head', 'body'):
-                            self._get_tag(part.tag).append(*part.contents)
-                        else: self.body(part)
-                else: self.body(node)
+            nodes, _ = self._parse_html(path.read_text(encoding='utf-8'))
+            for node in nodes:
+                if isinstance(node, Element) and node.tag in ('head', 'body'):
+                    self._get_tag(node.tag).set(**node.args).append(*node.contents)
+                else:
+                    self.body(node)
         elif extension == '.css':
             self.head(Element('style', RawHTML(path.read_text(encoding='utf-8'))))
         elif extension == '.js':
             self.body(Element('script', RawHTML(path.read_text(encoding='utf-8'))))
-        else: raise ValueError(f'Unsupported file type: {path}')
+        else:
+            raise ValueError(f'Unsupported file type: {path}')
 
     def head(self, *contents, **attrs):
         node = self._get_tag('head')
@@ -201,9 +249,18 @@ class Page:
 
     def build(self, to=None):
         path = FilePath(to or f'{self.name}.html')
-        html = '<!DOCTYPE html><html>' + ''.join(node.__build__(self) if isinstance(node, Element) else str(node) for node in self.content) + '</html>'
-        if hasattr(path, 'write'): path.write(html)
-        else: Path(str(path)).write_text(html, encoding='utf-8')
+        self._normalize_document()
+        attrs = ''.join(f' {k}="{escape(str(v), quote=True)}"' for k, v in self.html_attrs.items() if v is not None)
+        html = '<!DOCTYPE html><html' + attrs + '>' + ''.join(
+            node.__build__(self) if isinstance(node, Element) else escape(str(node))
+            for node in self.content
+        ) + '</html>'
+        if isinstance(path, Path):
+            path.write_text(html, encoding='utf-8')
+        elif hasattr(path, 'write'):
+            path.write(html)
+        else:
+            Path(str(path)).write_text(html, encoding='utf-8')
         return path
 
 
