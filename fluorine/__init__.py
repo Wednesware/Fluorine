@@ -201,25 +201,42 @@ class Page:
         else:
             raise ValueError(f'Unsupported file type: {path}')
 
-    def head(self, *contents, **attrs):
-        node = self._get_tag('head')
-        node.append(*contents)
-        node.set(**attrs)
-        return node
+    def connect(self, path: FilePath | str) -> None: # type: ignore
+        path = str(path)
+        match str(path).split(".")[-1].lower():
+            case "html":
+                with open(path) as file:
+                    content: str = file.read()
+                self._html_content += content
+            case "css":
+                self._html_content += f"<link rel=\"stylesheet\" href=\"{path}\">"
+            case "js":
+                self._html_content += f"<script src=\"{path}\"></script>"
+            case _:
+                raise ValueError(f"Unsupported file type for connection: {path}")
+    
+    def head(self, *contents: str | Element, **args: str) -> None:
+        attrs: str = self._render_attrs(**args)
+        self._html_content += f"<head{(' ' + attrs) if attrs else ''}>{''.join([arg.__build__(page=self) if isinstance(arg, Element) else str(arg) for arg in contents])}</head>"
 
-    def body(self, *contents, **attrs):
-        node = self._get_tag('body')
-        node.append(*contents)
-        node.set(**attrs)
-        return node
+    def body(self, *contents: str | Element, **args: str) -> None:
+        attrs: str = self._render_attrs(**args)
+        self._html_content += f"<body{(' ' + attrs) if attrs else ''}>{''.join([arg.__build__(page=self) if isinstance(arg, Element) else str(arg) for arg in contents])}</body>"
 
     class _StyleSetting:
-        def __init__(self, page, prefix=''): self.page, self.prefix = page, prefix
-        def __getattr__(self, name): return type(self)(self.page, self.prefix+'.'+name)
-        def __call__(self, identifier='*', *styles, **kwargs):
-            selector = (self.prefix + identifier) if identifier != '*' else (self.prefix or '*')
-            declarations = ''.join(str(s) for s in (*styles, Style(**kwargs)))
-            self.page.head(Element('style', RawHTML(f'{selector} {{ {declarations} }}')))
+        def __init__(self, page: "Page") -> None:
+            self.page: "Page" = page
+            self.class_name: str = ""
+            
+        def __getattr__(self, class_name: str) -> "_StyleSetting": # type: ignore
+            self.class_name += f".{class_name}"
+            return self
+            
+        def __call__(self, identifier: str = "*", *style_objects: Style, **styles: str) -> None:
+            style_objects += (Style(**styles),)
+            identifier = self.class_name.strip() if self.class_name and identifier == "*" else f"{self.class_name}{identifier}"
+            self.page._html_content += f"<style>{identifier} {{ {''.join([str(style) for style in style_objects])} }}</style>"
+            self.class_name = ""
 
     def script(self, script):
         self.body(Element('script', RawHTML('; '.join(script._js_lines) if isinstance(script, Script) else str(script))))
@@ -227,41 +244,8 @@ class Page:
     def bind(self, element, event_name, handler):
         return element.bind(event_name, handler)
 
-    def validate(self):
-        issues = []
-        ids = set()
-        for tag in ('head', 'body'):
-            if sum(isinstance(c, Element) and c.tag == tag for c in self.content) != 1:
-                issues.append(f'Expected exactly one {tag} element')
-        from .structuring import VOID_TAGS
-        def walk(node, parent=None):
-            if not isinstance(node, Element): return
-            ident = node.args.get('id')
-            if ident:
-                if ident in ids: issues.append(f'Duplicate id: {ident}')
-                ids.add(ident)
-            if node.tag in VOID_TAGS and node.contents: issues.append(f'Void element <{node.tag}> has children')
-            if parent == 'p' and node.tag in ('div', 'p', 'section', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'):
-                issues.append(f'Block <{node.tag}> inside <p>')
-            for child in node.contents: walk(child, node.tag)
-        for node in self.content: walk(node)
-        return issues
-
-    def build(self, to=None):
-        path = FilePath(to or f'{self.name}.html')
-        self._normalize_document()
-        attrs = ''.join(f' {k}="{escape(str(v), quote=True)}"' for k, v in self.html_attrs.items() if v is not None)
-        html = '<!DOCTYPE html><html' + attrs + '>' + ''.join(
-            node.__build__(self) if isinstance(node, Element) else escape(str(node))
-            for node in self.content
-        ) + '</html>'
-        if isinstance(path, Path):
-            path.write_text(html, encoding='utf-8')
-        elif hasattr(path, 'write'):
-            path.write(html)
-        else:
-            Path(str(path)).write_text(html, encoding='utf-8')
-        return path
-
-
-__all__ = ['Site', 'Page', 'Style', 'look', 'Script', 'document', 'event', 'Element', 'component']
+    def build(self, to: str | FilePath | None = None) -> FilePath | None: # type: ignore
+        to = FilePath(to or f"{self.name}.html")
+        html_content = f"<!DOCTYPE html><html>{self._html_content}</html>"
+        to.write(html_content)
+        return to
