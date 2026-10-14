@@ -137,7 +137,15 @@ class _ScriptEvent:
         self.name: str = name
         self.handler: object = handler
 
-def event(**events) -> tuple[_ScriptEvent, ...]:
-    return tuple(_ScriptEvent(name, handler) for name, handler in events.items())
+class _EventClass:
+    def __init__(self) -> None:
+        pass
+    
+    def __getattr__(self, name: str) -> callable:
+        return lambda func: self(**{name: func})
+    
+    def __call__(self, **events) -> tuple[_ScriptEvent, ...]:
+        return tuple(_ScriptEvent(name, handler) for name, handler in events.items())
 
 document: DocumentProxy = DocumentProxy()
+event: _EventClass = _EventClass()
