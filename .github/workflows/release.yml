@@ -1,0 +1,62 @@
+name: Test and release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.12', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Unit tests and archive validation
+        env:
+          PYTHONPATH: .
+        run: python -m unittest discover -s tests -v
+      - run: python -m compileall -q fluorine examples tests tools
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node tests/test_bridge.js
+
+  release:
+    if: github.event_name != 'pull_request'
+    needs: [test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build clean Nitrogen archive
+        run: python tools/build_release.py
+      - name: Publish a new version after all checks pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(cat VERSION)
+          if gh release view "$version" >/dev/null 2>&1; then
+            echo "Release $version already exists; leaving it unchanged."
+            exit 0
+          fi
+          tail -n +3 CHANGELOG.md > dist/release-notes.md
+          gh release create "$version" dist/fluorine.zip \
+            --target "$GITHUB_SHA" --title "$version" \
+            --notes-file dist/release-notes.md --latest

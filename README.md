@@ -5,7 +5,7 @@
 
 # Fluorine
 
-A Python webpage framework with built-in structuring, styling, and scripting capabilities.
+An HTML generator with Python helpers for structure, styling, and JavaScript. Version 26.7.
 
 ## Installation
 
@@ -51,6 +51,11 @@ page.build("demo.html")
 ```
 
 ### Event handling and DOM updates
+
+Python event handlers require a running host such as Sulfur 26.9. Building an
+HTML file does not embed a Python interpreter or serialize Python functions.
+HTML, CSS, and JavaScript work independently in a browser.
+
 
 ```python
 from ww.f import Page
@@ -248,3 +253,73 @@ From the live reload helper, you can import the development watcher.
 Watches a file for changes and re-runs the script when `--livereload` is passed in.
 
 > `live_reload(__file__)`
+
+
+## Callback and host contract (26.7)
+
+`page.render()` returns HTML without writing a file. Both `render()` and `build()`
+collect Python handlers into `page.callbacks`, a read-only mapping from public
+JavaScript API names to callables. Repeated renders preserve names, and bound
+methods are deduplicated. Use `functools.partial` to bind arguments without
+writing a closure for each button:
+
+```python
+from functools import partial
+from fluorine import Element, Page
+
+page = Page('controls')
+
+def move(direction):
+    print(direction)
+
+page.body(Element('button', 'Left', onclick=partial(move, 'left')),
+          Element('button', 'Right', onclick=partial(move, 'right')))
+page.build('output/controls.html')
+
+# Optional desktop host, in the same Python process:
+from sulfur import App
+App('output/controls.html', callbacks=page.callbacks).open()
+```
+
+For live updates to the Python element tree, use `App(page)`; Sulfur builds the
+HTML and attaches its runtime automatically. With an already-built file, callbacks
+can use `app.run(...)`, or you can explicitly attach `page.attach_runtime(app.runtime)`
+when the file was generated from that same page. When building and launching in
+separate processes, provide the original callback mapping again. Python functions
+are never recovered from HTML. Generated callback names may change if the page's
+handler order changes, so keep HTML and registry from the same build together.
+
+Callback-enabled documents include a small helper:
+`window.fluorine.call(name, ...args)` returns a Promise, waits up to 10 seconds for
+a host connection, and rejects with a useful error if the host or callback is
+missing. Generated event attributes report rejections to the console. Custom hosts
+can call `window.fluorine.connect(api)` with an object of named functions. A
+pywebview adapter is also included in this optional helper for compatibility.
+Documents with no Python callbacks do not include it.
+
+`Page.attach_runtime(runtime)` accepts any object with `evaluate_js(script)`;
+readiness buffering belongs to the host. `detach_runtime()` stops live delivery.
+The previous `_attach_window()` hook remains available for older hosts.
+
+## Less repetitive element updates
+
+- `container.replace(*children)` replaces children with one DOM update.
+- `button.bind('click', handler)` works before and after the page loads.
+- `button.set(disabled=False)` removes the boolean attribute in HTML and the DOM.
+- `aria_label='Move left'` and `data_action='move'` generate hyphenated attributes.
+- `page.build('nested/path/index.html')` creates missing parent directories.
+- Use the existing `@component` decorator for reusable element factories.
+
+See [examples/callbacks.py](examples/callbacks.py) for a complete counter.
+Prefer `page.document` over the global `document` proxy when using multiple pages.
+
+## Development
+
+```sh
+PYTHONPATH=. python3 -m unittest discover -s tests -v
+node tests/test_bridge.js
+python3 tools/build_release.py
+```
+
+The build produces `dist/fluorine.zip` with the directory layout expected by
+Nitrogen. See [CHANGELOG.md](CHANGELOG.md) for compatibility notes.

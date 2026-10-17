@@ -11,6 +11,8 @@ ALIASES = {'input_': 'input', 'map_': 'map', 'object_': 'object'}
 
 
 def _attr_name(name):
+    if name.startswith(('aria_', 'data_')):
+        return name.replace('_', '-')
     return {'class_': 'class', 'for_': 'for', 'http_equiv': 'http-equiv'}.get(name, name.rstrip('_') if name.endswith('_') else name)
 
 
@@ -79,7 +81,14 @@ class Element:
 
     def append(self, *children):
         self.contents.extend(children)
-        if self._page and self._page._window:
+        if self._page and self._uid is not None:
+            self._sync('html', None, self._inner_html(self._page))
+        return self
+
+    def replace(self, *children):
+        """Replace children with one DOM update, preserving element objects."""
+        self.contents = list(children)
+        if self._page and self._uid is not None:
             self._sync('html', None, self._inner_html(self._page))
         return self
 
@@ -96,8 +105,12 @@ class Element:
         return self
 
     def bind(self, event_name, handler):
+        event_name = event_name.lower()
+        if not event_name.startswith('on'):
+            event_name = 'on' + event_name
         self._events[event_name] = handler
         self.args[event_name] = handler
+        self._sync('attr', event_name, handler)
         return self
 
     def __matmul__(self, modifiers):
@@ -111,14 +124,18 @@ class Element:
 
     def _sync(self, action, key, value):
         page = self._page
-        if page is None or page._window is None or self._uid is None: return
+        if page is None or self._uid is None: return
         js = ('(function(){const e=document.querySelector(' + json.dumps('[data-fluorine-id="' + self._uid + '"]') + ');if(!e)return;')
         if action == 'text': js += 'e.textContent=' + json.dumps(value) + ';'
         elif action == 'html': js += 'e.innerHTML=' + json.dumps(value) + ';'
         elif action == 'style': js += 'e.style.setProperty(' + json.dumps(key) + ',' + json.dumps(str(value)) + ');'
         elif action == 'attr':
-            if value is None: js += 'e.removeAttribute(' + json.dumps(key) + ');'
-            else: js += 'e.setAttribute(' + json.dumps(key) + ',' + json.dumps(str(value)) + ');'
+            if callable(value):
+                value = value.as_handler() if hasattr(value, 'as_handler') else page.register_python_handler(value)
+            if value is None or value is False:
+                js += 'e.removeAttribute(' + json.dumps(key) + ');'
+            else:
+                js += 'e.setAttribute(' + json.dumps(key) + ',' + json.dumps('' if value is True else str(value)) + ');'
         page._run(js + '})();')
 
     def _inner_html(self, page=None):
@@ -167,3 +184,4 @@ for _name in HTML_TAGS:
     globals()[_name] = Element(_name)
 
 __all__ = HTML_TAGS + ['Element', 'RawHTML', 'component']
+

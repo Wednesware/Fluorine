@@ -1,11 +1,15 @@
 """Fluorine: Python-authored HTML with a mutable element tree."""
 import re
+import json
 from html import escape
 from html.parser import HTMLParser
 from pathlib import Path
+from types import MappingProxyType
 from .structuring import Element, RawHTML, component, head as head_tag, body as body_tag
 from .styling import Style, look
 from .scripting import Script, document, event
+
+__version__ = '26.7'
 
 try:
     from nitrogen import require
@@ -166,21 +170,45 @@ class Page:
         return None
 
     def _attach_window(self, window):
+        # Compatibility alias; hosts can implement just evaluate_js().
+        self.attach_runtime(window)
+
+    def attach_runtime(self, runtime):
+        """Attach an optional runtime. Sulfur buffers execution until ready."""
+        if not callable(getattr(runtime, 'evaluate_js', None)):
+            raise TypeError('Runtime must provide evaluate_js(script)')
+        window = runtime
         self._window = window
         for script in self._queued_js:
             if hasattr(window, 'evaluate_js'): window.evaluate_js(script)
         self._queued_js.clear()
 
+    def detach_runtime(self):
+        """Return to HTML-generation mode without discarding the element tree."""
+        self._window = None
+
+    @property
+    def callbacks(self):
+        """Read-only snapshot of callbacks registered by render() or build()."""
+        return MappingProxyType(dict(self._python_handlers))
+
     def register_python_handler(self, handler):
         if not callable(handler): raise TypeError('Expected callable')
-        key = id(handler)
-        if key not in self._handler_ids or self._python_handlers.get(self._handler_ids[key]) is not handler:
-            base = re.sub(r'\W|^(?=\d)', '_', getattr(handler, '__name__', 'handler')) or 'handler'
-            name = f'_fl_{base}_{len(self._python_handlers)}'
+        # Repeated access to a bound method creates a new method object.
+        owner = getattr(handler, '__self__', None)
+        function = getattr(handler, '__func__', None)
+        key = (id(owner), id(function)) if function is not None else id(handler)
+        if key not in self._handler_ids:
+            base = re.sub(r'\W|^(?=\d)', '_', getattr(handler, '__name__', 'handler'),
+                          flags=re.ASCII) or 'handler'
+            name = f'fl_{base}_{len(self._python_handlers)}'
             self._python_handlers[name] = handler
             self._handler_ids[key] = name
             setattr(self, name, handler)
-        return f'window.pywebview.api.{self._handler_ids[key]}()'
+            if self._window is not None and len(self._python_handlers) == 1:
+                self._run(Path(__file__).with_name('bridge.js').read_text(encoding='utf-8'))
+        name = json.dumps(self._handler_ids[key])
+        return f'window.fluorine.call({name}).catch(console.error)'
 
     def log(self, message): print(f'{message} {Color.gray}(log from page {self.name!r}){Color.reset}')
 
@@ -258,19 +286,26 @@ class Page:
             walk(node)
         return issues
 
-    def build(self, to=None):
+    def render(self):
+        """Generate HTML and collect callbacks without writing a file."""
         self._normalize_document()
-        path = FilePath(to or f'{self.name}.html')
         attrs = ''.join(f' {key}="{escape(str(value), quote=True)}"' if value is not None else f' {key}' for key, value in self.html_attrs.items())
         html = '<!DOCTYPE html><html' + attrs + '>' + ''.join(
             node.__build__(page=self) if isinstance(node, Element) else str(node)
             for node in self.content
         ) + '</html>'
-        if hasattr(path, 'write'):
-            path.write(html)
-        else:
-            Path(str(path)).write_text(html, encoding='utf-8')
-        return path
+        if self._python_handlers:
+            bridge = Path(__file__).with_name('bridge.js').read_text(encoding='utf-8')
+            html = html.replace('</head>', '<script>' + bridge + '</script></head>', 1)
+        return html
+
+    def build(self, to=None):
+        """Write a UTF-8 HTML document, creating parent directories as needed."""
+        html = self.render()
+        path = Path(str(to or f'{self.name}.html'))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(html, encoding='utf-8')
+        return FilePath(str(path))
 
 
 __all__ = ['Site', 'Page', 'Style', 'look', 'Script', 'document', 'event', 'Element', 'component']
